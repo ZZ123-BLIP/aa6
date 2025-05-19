@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>P5.js Effects Demo with Color Extraction & Selector</title>
+  <!-- 引入 p5.js 及 DOM 扩展 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/addons/p5.dom.min.js"></script>
+  <style>
+    body { margin:0; overflow:hidden; }
+    #controls { position:absolute; top:10px; left:10px; z-index:10; background:#fff; padding:10px; border-radius:5px; }
+    #color-pool { margin-top:5px; display:flex; flex-wrap:wrap; max-width:300px; }
+    .color-swatch { width:24px; height:24px; margin:2px; border:2px solid #ccc; cursor:pointer; }
+    .selected { border-color:#000; }
+    #apply-btn { margin-top:5px; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <label>Upload Image: <input type="file" id="file-input" accept="image/*"></label><br>
+    <button id="clear-btn">Clear Effects</button><br>
+    <div id="color-pool"></div>
+    <button id="apply-btn">Apply 5 Colors</button>
+  </div>
+  <script>
+    let effects = [];
+    let colors = ['#eac435','#345995','#e40066','#fb4d3d','#000000'];
+    let extracted = [];
+    let selected = new Set();
+
+    function setup() {
+      createCanvas(900,900);
+      rectMode(CENTER);
+      select('#file-input').input(handleFile);
+      select('#clear-btn').mousePressed(()=>effects=[]);
+      select('#apply-btn').mousePressed(applyColors);
+    }
+
+    function draw() {
+      background(255);
+      effects.forEach(e=>e.run());
+      for(let i=effects.length-1;i>=0;i--) if(effects[i].isDead) effects.splice(i,1);
+      if(frameCount%10===0) effects.push(new EffectGroup(random(width),random(height)));
+      drawColorPie();
+    }
+
+    function handleFile() {
+      const file = this.elt.files[0];
+      if(file && file.type.startsWith('image')){
+        loadImage(URL.createObjectURL(file),img=>{
+          img.resize(100,0);
+          extractColors(img);
+        });
+      }
+    }
+
+    function extractColors(img) {
+      img.loadPixels();
+      const mapCount={}; const step=5;
+      for(let y=0;y<img.height;y+=step){
+        for(let x=0;x<img.width;x+=step){
+          const i=4*(y*img.width+x);
+          let r=Math.round(img.pixels[i]/32)*32;
+          let g=Math.round(img.pixels[i+1]/32)*32;
+          let b=Math.round(img.pixels[i+2]/32)*32;
+          r=constrain(r,0,255);g=constrain(g,0,255);b=constrain(b,0,255);
+          const key=`${r},${g},${b}`;
+          mapCount[key]=(mapCount[key]||0)+1;
+        }
+      }
+      const sorted=Object.entries(mapCount).sort((a,b)=>b[1]-a[1]).slice(0,10);
+      extracted=sorted.map(([k])=>{
+        const [r,g,b]=k.split(',').map(Number);
+        return '#'+hex(r,2)+hex(g,2)+hex(b,2);
+      });
+      selected.clear();
+      renderSwatches();
+    }
+
+    function renderSwatches(){
+      const pool = select('#color-pool');
+      pool.html('');
+      extracted.forEach((c,i)=>{
+        const sw = createDiv();
+        sw.addClass('color-swatch');
+        sw.style('background',c);
+        sw.attribute('data-index',i);
+        sw.mousePressed(()=>toggleSelect(i,sw));
+        pool.child(sw);
+      });
+    }
+
+    function toggleSelect(i,el){
+      if(selected.has(i)){ selected.delete(i); el.removeClass('selected'); }
+      else if(selected.size<5){ selected.add(i); el.addClass('selected'); }
+    }
+
+    function applyColors(){
+      if(selected.size===5){
+        colors = Array.from(selected).map(i=>extracted[i]);
+        console.log('Applied colors',colors);
+      } else alert('Please select exactly 5 colors.');
+    }
+
+    function drawColorPie(){
+      const cx=width-100, cy=height-100, r=80;
+      let start=0, counts=extracted.map((_,i)=> selected.has(i)?1:0);
+      const total=counts.reduce((a,b)=>a+b,0)||1;
+      for(let i=0;i<extracted.length;i++){
+        const ang=(counts[i]/total)*TWO_PI;
+        fill(extracted[i]); noStroke();
+        arc(cx,cy,2*r,2*r,start,start+ang,PIE);
+        start+=ang;
+      }
+      stroke(255); strokeWeight(2); noFill(); ellipse(cx,cy,2*r,2*r);
+    }
+
+    // Easing & Classes (unchanged)...
+    function easeOutCubic(x){return 1-pow(1-x,3);}    function easeOutExpo(x){return x===1?1:1-pow(2,-10*x);}    function easeInQuart(x){return x*x*x*x;}
+    class EffectGroup{constructor(x,y){this.x=x;this.y=y;this.phase=0;this.isDead=false;this.agents=[new Raindrop(x,y,int(random(90,120)),random(colors))];}run(){this.agents.forEach(a=>a.run());this.agents=this.agents.filter(a=>!a.isDead);if(!this.agents.length&&this.phase===0)this.phase=1;if(this.phase===1){this.agents.push(new Donut(this.x,this.y,int(random(40,50)),random(colors)));for(let i=0;i<50;i++)this.agents.push(new Splash(this.x,this.y,int(random(90,120))));this.phase=2;}if(this.phase===2&&!this.agents.length)this.isDead=true;}}
+    class Agent{constructor(x,y,life){this.x=x;this.y=y;this.life=life;this.max=life;this.isDead=false;this.amount=0;}update(){this.amount=map(this.life,0,this.max,1,0);}check(){if(--this.life<=0)this.isDead=true;}run(){this.show();this.move();this.check();this.update();}move(){}show(){}}
+    class Raindrop extends Agent{constructor(x,y,l,clr){super(x,y,l);this.w=width*random(0.01,0.02);this.h=this.w*2.5;this.sh=-height/2;this.clr=clr;}show(){push();translate(this.x,this.y);noStroke();fill(this.clr);ellipse(0,this.sh*pow(1-this.amount,3),this.w*this.amount,this.h*this.amount);pop();}}
+    class Splash extends Agent{constructor(x,y,l){super(x,y,l);this.type=int(random(4));this.w=width*random(0.01,0.05);let r=this.w*random(1,4),a=random(TAU);this.dx=r*cos(a);this.dy=r*sin(a);this.clr=random(colors);this.rev=TAU*random(10)*random(-1,1);}show(){push();translate(this.x,this.y);noFill();stroke(this.clr);let a=this.amount;switch(this.type){case 0:circle(this.dx*easeOutExpo(a),this.dy*easeOutExpo(a),this.w*(1-easeOutCubic(a)));break;case 1:strokeWeight(this.w*0.1*(1-a));line(this.dx*easeOutExpo(a),this.dy*easeOutExpo(a),this.dx*easeOutCubic(a),this.dy*easeOutCubic(a));break;case 2:if(random()<0.5)circle(this.dx*easeOutExpo(a),this.dy*easeOutExpo(a),width*0.005*(1-a));break;case 3:let ang=this.rev*a,rad=this.w*(1-easeOutCubic(a));point(this.dx*easeOutCubic(a)+rad*cos(ang),this.dy*easeOutCubic(a)+rad*sin(ang));break;}pop();}}
+    class Donut extends Agent{constructor(x,y,l,clr){super(x,y,l);this.d=width*random(0.05,0.08);this.clr=clr;}show(){push();translate(this.x,this.y);noFill();stroke(this.clr);strokeWeight(2);beginShape();for(let a=0;a<TAU;a+=TAU/360)vertex((this.d/2*easeOutExpo(this.amount))*cos(a),(this.d/2*easeOutExpo(this.amount))*sin(a));endShape(CLOSE);pop();}}
+  </script>
+</body>
+</html>
